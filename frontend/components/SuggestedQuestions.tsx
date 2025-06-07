@@ -15,7 +15,7 @@ export function SuggestedQuestions({ onQuestionSelect, isLoading }: SuggestedQue
     useEffect(() => {
         const fetchSuggestions = async () => {
             try {
-                const response = await fetch("http://localhost:8000/suggest-questions");
+                const response = await fetch("http://168.75.101.234:8000/suggest-questions");
                 if (!response.ok) {
                     throw new Error("Falha ao buscar sugestões.");
                 }
