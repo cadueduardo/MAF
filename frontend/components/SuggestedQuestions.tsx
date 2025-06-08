@@ -15,9 +15,9 @@ export function SuggestedQuestions({ onQuestionSelect, isLoading }: SuggestedQue
     useEffect(() => {
         const fetchSuggestions = async () => {
             try {
-                const response = await fetch("http://168.75.101.234:8000/suggest-questions");
+                const response = await fetch("/cpe/api/suggest-questions");
                 if (!response.ok) {
-                    throw new Error("Falha ao buscar sugestões.");
+                    throw new Error("A resposta da rede não foi 'ok'.");
                 }
                 const data = await response.json();
                 setSuggestions(data.suggestions || []);
