@@ -56,7 +56,7 @@ export default function Home() {
     setMessages((prev) => [...prev, { sender: "bot", text: "" }]);
 
     try {
-      const response = await fetch("http://168.75.101.234:8000/ask", {
+      const response = await fetch("/cpe/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: question }),
