@@ -16,7 +16,7 @@ def load_individual_document_types(data_path: str):
     
     # Define os caminhos e os loaders para cada tipo de arquivo
     configs = [
-        {"path": os.path.join(data_path, "json"), "glob": "*.json", "loader_cls": JSONLoader, "loader_kwargs": {'jq_schema': '.[]', 'text_content': False}},
+        {"path": os.path.join(data_path, "json"), "glob": "*.json", "loader_cls": JSONLoader, "loader_kwargs": {'jq_schema': '.', 'text_content': True}},
         {"path": os.path.join(data_path, "DTS"), "glob": "*.docx", "loader_cls": Docx2txtLoader, "loader_kwargs": {}},
         {"path": os.path.join(data_path, "DTS"), "glob": "*.pdf", "loader_cls": PyPDFLoader, "loader_kwargs": {}},
     ]
