@@ -13,4 +13,5 @@ jq
 gunicorn
 requests
 beautifulsoup4
-docx2txt 
+docx2txt
+filelock 

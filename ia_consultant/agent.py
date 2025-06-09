@@ -1,6 +1,7 @@
 import os
 import random
 from dotenv import load_dotenv
+from filelock import FileLock
 
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
@@ -17,6 +18,7 @@ load_dotenv()
 
 # --- Configuração ---
 VECTOR_STORE_PATH = "faiss_index"
+LOCK_FILE = "faiss_index.lock"
 # O caminho para a pasta de documentos do cliente
 # Estamos usando um caminho relativo que pressupõe uma estrutura de pastas
 # ../ -> sobe um nível (de 'ia_consultant' para a raiz 'MAF')
@@ -91,25 +93,30 @@ class Agent:
     def _load_or_create_vector_store(self):
         """
         Carrega o Vector Store do disco se existir.
-        Caso contrário, cria um novo a partir dos documentos.
+        Caso contrário, cria um novo a partir dos documentos, usando uma trava
+        para evitar que múltiplos processos o façam ao mesmo tempo.
         """
-        if os.path.exists(VECTOR_STORE_PATH):
-            print(f"Carregando base de conhecimento de '{VECTOR_STORE_PATH}'...")
-            self.vector_store = FAISS.load_local(VECTOR_STORE_PATH, self.embeddings, allow_dangerous_deserialization=True)
-        else:
-            print("Nenhuma base de conhecimento encontrada. Criando uma nova...")
-            from data_loader import load_documents
-            
-            # Agora carrega tanto dos arquivos locais quanto do site
-            documents = load_documents(path=DATA_PATH, website_url="http://cpe.ind.br")
-            
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            split_documents = text_splitter.split_documents(documents)
-            
-            self.vector_store = FAISS.from_documents(split_documents, self.embeddings)
-            
-            print(f"Salvando nova base de conhecimento em '{VECTOR_STORE_PATH}'...")
-            self.vector_store.save_local(VECTOR_STORE_PATH)
+        # Trava para garantir que apenas um processo crie o índice. Timeout de 10 min.
+        lock = FileLock(LOCK_FILE, timeout=600)
+
+        with lock:
+            if os.path.exists(VECTOR_STORE_PATH):
+                print(f"Carregando base de conhecimento de '{VECTOR_STORE_PATH}'...")
+                self.vector_store = FAISS.load_local(VECTOR_STORE_PATH, self.embeddings, allow_dangerous_deserialization=True)
+            else:
+                print("Nenhuma base de conhecimento encontrada. Criando uma nova...")
+                from data_loader import load_documents
+                
+                # Agora carrega tanto dos arquivos locais quanto do site
+                documents = load_documents(path=DATA_PATH, website_url="http://cpe.ind.br")
+                
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                split_documents = text_splitter.split_documents(documents)
+                
+                self.vector_store = FAISS.from_documents(split_documents, self.embeddings)
+                
+                print(f"Salvando nova base de conhecimento em '{VECTOR_STORE_PATH}'...")
+                self.vector_store.save_local(VECTOR_STORE_PATH)
 
     def ask(self, question: str):
         """
