@@ -9,14 +9,38 @@ from langchain_core.documents import Document
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+import json
+
+def load_json_docs(path: str):
+    """Carrega arquivos JSON de um diretório e os converte em Documentos."""
+    json_docs = []
+    if not os.path.exists(path):
+        print(f"Diretório JSON não encontrado, pulando: {path}")
+        return json_docs
+        
+    for filename in os.listdir(path):
+        if filename.endswith('.json'):
+            file_path = os.path.join(path, filename)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # Converte o dicionário JSON inteiro para uma string formatada
+                    text_content = json.dumps(data, indent=2, ensure_ascii=False)
+                    json_docs.append(Document(page_content=text_content, metadata={"source": file_path}))
+            except Exception as e:
+                print(f"Erro ao carregar o arquivo JSON {filename}: {e}")
+    return json_docs
 
 def load_individual_document_types(data_path: str):
     """Carrega documentos de subdiretórios específicos (json, DTS) para evitar erros."""
     all_docs = []
     
-    # Define os caminhos e os loaders para cada tipo de arquivo
+    # Carrega JSONs manualmente
+    json_path = os.path.join(data_path, "json")
+    all_docs.extend(load_json_docs(json_path))
+    
+    # Define os caminhos e os loaders para outros tipos de arquivo
     configs = [
-        {"path": os.path.join(data_path, "json"), "glob": "*.json", "loader_cls": JSONLoader, "loader_kwargs": {'jq_schema': '.', 'text_content': True}},
         {"path": os.path.join(data_path, "DTS"), "glob": "*.docx", "loader_cls": Docx2txtLoader, "loader_kwargs": {}},
         {"path": os.path.join(data_path, "DTS"), "glob": "*.pdf", "loader_cls": PyPDFLoader, "loader_kwargs": {}},
     ]
