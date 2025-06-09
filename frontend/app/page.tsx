@@ -55,16 +55,28 @@ export default function Home() {
   }, [messages, currentConversationId]); // Roda sempre que as mensagens ou o ID da conversa mudam
 
 
-  const sendMessageToServer = async (question: string) => {
+  const handleSendMessage = async (question: string) => {
+    if (!question.trim() || isLoading) return;
     setIsLoading(true);
-    // Adiciona a mensagem do bot vazia para mostrar o indicador de "digitando"
-    setMessages((prev) => [...prev, { sender: "bot", text: "" }]);
+
+    const userMessage: Message = { sender: "user", text: question };
+    const historyForAPI = [...messages]; // Histórico ANTES de adicionar a nova pergunta do usuário
+
+    // Garante que temos um ID para a conversa
+    let convId = currentConversationId;
+    if (!convId) {
+      convId = uuidv4();
+      setCurrentConversationId(convId);
+    }
+    
+    // Atualiza a interface com a mensagem do usuário e o indicador de "digitando..." do bot
+    setMessages(prev => [...prev, userMessage, { sender: "bot", text: "" }]);
 
     try {
       const response = await fetch("/cpe/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: question }),
+        body: JSON.stringify({ question: question, history: historyForAPI }),
       });
 
       if (!response.ok) throw new Error("A resposta da rede não foi 'ok'.");
@@ -72,67 +84,49 @@ export default function Home() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let firstChunk = true; // Flag para lidar com o primeiro pedaço da resposta
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         
         const chunk = decoder.decode(value, { stream: true });
+        
         setMessages((prev) => {
-            const newMessages = [...prev];
-            const lastMessageIndex = newMessages.length - 1;
-            if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].sender === "bot") {
-                const updatedLastMessage = { 
-                    ...newMessages[lastMessageIndex],
-                    text: newMessages[lastMessageIndex].text + chunk 
-                };
-                newMessages[lastMessageIndex] = updatedLastMessage;
-            }
-            return newMessages;
+          const newMessages = [...prev];
+          const lastMessageIndex = newMessages.length - 1;
+          
+          if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].sender === "bot") {
+            // No primeiro chunk, substitui o "digitando...". Nos seguintes, anexa.
+            const newText = firstChunk ? chunk : newMessages[lastMessageIndex].text + chunk;
+            firstChunk = false;
+            
+            newMessages[lastMessageIndex] = { ...newMessages[lastMessageIndex], text: newText };
+          }
+          return newMessages;
         });
       }
 
     } catch (error) {
       console.error("Houve um problema com a sua requisição:", error);
       setMessages((prev) => {
-          const newMessages = [...prev];
-          const lastMessageIndex = newMessages.length - 1;
-          if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].sender === "bot") {
-            const updatedLastMessage = {
-                ...newMessages[lastMessageIndex],
-                text: "Desculpe, não consegui me conectar ao meu cérebro. Tente novamente mais tarde."
-            };
-            newMessages[lastMessageIndex] = updatedLastMessage;
-          }
-          return newMessages;
-        });
+        const newMessages = [...prev];
+        const lastMessageIndex = newMessages.length - 1;
+        if (lastMessageIndex >= 0 && newMessages[lastMessageIndex].sender === "bot") {
+          newMessages[lastMessageIndex] = {
+            ...newMessages[lastMessageIndex],
+            text: "Desculpe, não consegui me conectar ao meu cérebro. Tente novamente mais tarde."
+          };
+        }
+        return newMessages;
+      });
     } finally {
       setIsLoading(false);
     }
   };
   
-  const startNewOrContinueChat = async (question: string) => {
-    const userMessage: Message = { sender: "user", text: question };
-    let conversationId = currentConversationId;
-    const newMessages = [...messages, userMessage];
-
-    // Se não há conversa ativa, inicie uma nova
-    if (!conversationId) {
-        conversationId = uuidv4();
-        setCurrentConversationId(conversationId);
-    }
-    
-    setMessages(newMessages);
-    await sendMessageToServer(question);
-  };
-
-  const handleSendMessage = (input: string) => {
-    if (!input.trim()) return;
-    startNewOrContinueChat(input);
-  };
-  
   const handleQuestionSelect = (question: string) => {
-    startNewOrContinueChat(question);
+    handleSendMessage(question);
   };
 
   const handleSelectConversation = (conversation: Conversation) => {

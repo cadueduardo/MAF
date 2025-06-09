@@ -9,9 +9,11 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+from langchain.chains import create_history_aware_retriever
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, AIMessage
 
 # Carregar variáveis de ambiente do .env
 load_dotenv()
@@ -51,46 +53,61 @@ class Agent:
         return OpenAIEmbeddings()
 
     def _setup_retrieval_chain(self):
-        """Configura a cadeia de recuperação de informações (RAG)."""
-        # Template do prompt para o chatbot
-        prompt_template = """Você é um assistente especialista de uma empresa de compostos plásticos. Sua personalidade é prestativa e profissional.
+        """Configura a cadeia de recuperação de informações (RAG) com memória de conversa."""
+        self._load_or_create_vector_store()
+        retriever = self.vector_store.as_retriever(search_kwargs={'k': 5})
 
-**FLUXO DE RACIOCÍNIO E REGRAS:**
+        # 1. Prompt para reescrever a pergunta do usuário com base no histórico
+        contextualize_q_system_prompt = """Dada uma conversa e uma pergunta de acompanhamento, reformule a pergunta de acompanhamento para ser uma pergunta independente, em seu idioma original.
+Se a pergunta de acompanhamento não estiver relacionada ao histórico, use-a como está.
+Não responda à pergunta, apenas reformule-a se necessário.
 
-1.  **ANÁLISE INICIAL:** Primeiro, analise a pergunta do usuário.
-    - Se for uma saudação simples (como "Olá", "Oi", "Bom dia"), responda de forma cordial e pergunte como pode ajudar, sem buscar no contexto.
-    - Se for uma pergunta técnica, prossiga para o passo 2.
+Histórico da Conversa:
+{chat_history}
 
-2.  **BUSCA NO CONTEXTO:** Sua principal função é responder perguntas com base **exclusivamente** no CONTEXTO de documentos técnicos fornecidos.
-
-3.  **LÓGICA DE RESPOSTA:**
-    - **SE** a resposta exata para a pergunta do usuário estiver no CONTEXTO, forneça-a de forma clara e direta.
-    - **SE** a pergunta for sobre um item específico (ex: "composto XPTO-123") que **NÃO** está no CONTEXTO, **NÃO DESISTA IMEDIATAMENTE**. Em vez disso, busque no CONTEXTO por itens da mesma **categoria** ou com **propriedades similares** e ofereça-os como alternativa. (Ex: "Não tenho informações sobre o composto XPTO-123, mas temos os compostos ABC-1 e DEF-2 que também são para aplicações de alta temperatura. Algum deles te interessa?").
-    - **SE** a pergunta for muito vaga ou se, após a busca por alternativas, você realmente não encontrar nada relevante no CONTEXTO, peça ao usuário para reformular a pergunta com mais detalhes. (Ex: "Não encontrei informações sobre isso. Você poderia me dar mais detalhes sobre a aplicação ou as propriedades que procura? Assim posso tentar te ajudar melhor.").
-    - **FORMATAÇÃO:** Para formatar suas respostas, use sempre HTML. Use `<b>` para negrito e `<ul>` com `<li>` para listas. Ao listar produtos ou dados técnicos, **SEMPRE use uma tabela HTML** para organizar a informação.
-      Exemplo de tabela: `<table border="1" style="width:100%; border-collapse: collapse;"><thead><tr><th style="text-align: left; padding: 8px;">Produto</th><th style="text-align: left; padding: 8px;">Descrição</th></tr></thead><tbody><tr><td style="padding: 8px;">Nome do Produto</td><td style="padding: 8px;">Detalhes...</td></tr></tbody></table>`.
-      **NÃO USE SINTAXE MARKDOWN** (`---`, `|`, `*`).
-
-**SINÔNIMOS E TERMOS DA EMPRESA:**
-- O termo "Normas" é um sinônimo para "Especificações Automotivas".
-
-**CONTEXTO:**
-{context}
-
-**PERGUNTA DO USUÁRIO:**
+Pergunta de Acompanhamento:
 {input}
 
-**RESPOSTA (siga o fluxo de raciocínio):**
-"""
-        prompt = ChatPromptTemplate.from_template(prompt_template)
-        
-        # Carrega ou cria o Vector Store
-        self._load_or_create_vector_store()
+Pergunta Independente:"""
+        contextualize_q_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", contextualize_q_system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
+        history_aware_retriever = create_history_aware_retriever(
+            self.llm, retriever, contextualize_q_prompt
+        )
 
-        retriever = self.vector_store.as_retriever()
-        question_answer_chain = create_stuff_documents_chain(self.llm, prompt)
+        # 2. Prompt para responder à pergunta com base no contexto recuperado
+        qa_system_prompt = """Você é um assistente especialista de uma empresa de compostos plásticos. Sua personalidade é prestativa, profissional e concisa.
+
+**REGRAS E FLUXO DE RACIOCÍNIO:**
+
+1.  **USE O HISTÓRICO DA CONVERSA** para entender perguntas de acompanhamento. (Ex: se o usuário pergunta "e sobre o XPTO-123?", você deve olhar o histórico para saber qual era o assunto anterior).
+2.  **USE O CONTEXTO FORNECIDO** para formular suas respostas. Não invente informações.
+3.  **SEJA DIRETO:** Em uma conversa contínua, evite saudações repetitivas como "Olá!", "Agradeço pela sua mensagem". Vá direto ao ponto.
+4.  **TABELAS:** Ao listar produtos ou dados técnicos, **SEMPRE inclua o nome ou código do produto na primeira coluna**. Use formatação HTML para tabelas. Ex: `<table border="1"><tr><td>NOME_PRODUTO</td><td>...</td></tr>...</table>`
+5.  **BUSCA ALTERNATIVA:** Se um item específico não estiver no CONTEXTO, busque por itens da mesma categoria ou com propriedades similares e ofereça-os como alternativa.
+6.  **SINÔNIMOS:** O termo "Normas" é um sinônimo para "Especificações Automotivas".
+
+**CONTEXTO DOS DOCUMENTOS:**
+{context}
+
+**RESPOSTA (siga as regras e use o histórico):**
+"""
+        qa_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", qa_system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
         
-        return create_retrieval_chain(retriever, question_answer_chain)
+        question_answer_chain = create_stuff_documents_chain(self.llm, qa_prompt)
+        
+        return create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
     def _load_or_create_vector_store(self):
         """
@@ -120,18 +137,19 @@ class Agent:
                 print(f"Salvando nova base de conhecimento em '{VECTOR_STORE_PATH}'...")
                 self.vector_store.save_local(VECTOR_STORE_PATH)
 
-    def ask(self, question: str):
+    def ask(self, question: str, chat_history: list):
         """
         Faz uma pergunta ao agente e retorna um gerador que transmite a resposta.
+        O histórico é uma lista de mensagens HumanMessage e AIMessage.
         """
         if not self.retrieval_chain:
             yield "Erro: A cadeia de recuperação não foi inicializada."
             return
         
-        # A forma correta de lidar com o stream é simplesmente iterar
-        # sobre os 'chunks' e extrair o conteúdo de 'answer'.
         # O LangChain já nos entrega o "delta" em cada chunk.
-        for chunk in self.retrieval_chain.stream({"input": question}):
+        for chunk in self.retrieval_chain.stream(
+            {"input": question, "chat_history": chat_history}
+        ):
             if 'answer' in chunk:
                 yield chunk['answer']
 
@@ -179,6 +197,9 @@ class Agent:
 if __name__ == "__main__":
     # Exemplo de como usar a classe Agent
     maf_agent = Agent()
+    
+    # Simula um histórico para teste local
+    chat_history_test = []
 
     print("\n--- Agente MAF Pronto ---")
     print("Faça sua pergunta ou digite 'sair' para terminar.")
@@ -188,5 +209,14 @@ if __name__ == "__main__":
         if user_question.lower() == 'sair':
             break
         
-        response = maf_agent.ask(user_question)
-        print(f"\nMAF: {response}") 
+        full_response = ""
+        # Itera sobre o gerador para obter a resposta completa
+        for part in maf_agent.ask(user_question, chat_history_test):
+            print(part, end="", flush=True)
+            full_response += part
+        
+        # Adiciona a pergunta e a resposta completa ao histórico de teste
+        chat_history_test.append(HumanMessage(content=user_question))
+        chat_history_test.append(AIMessage(content=full_response))
+        
+        print() # Nova linha para a próxima pergunta 

@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List, Literal
 from agent import Agent
 from fastapi.responses import StreamingResponse
 import asyncio
+from langchain_core.messages import HumanMessage, AIMessage
 
 # Variável para armazenar a instância do agente
 maf_agent_instance = None
@@ -44,25 +46,43 @@ app.add_middleware(
 )
 # --- Fim da Configuração do CORS ---
 
-# Modelo de dados para a requisição
+# Modelo para validar o corpo da requisição
+class Message(BaseModel):
+    sender: Literal["user", "bot"]
+    text: str
+
 class QuestionRequest(BaseModel):
     question: str
+    history: List[Message] = Field(default_factory=list)
 
 # Função geradora assíncrona para o streaming
-async def stream_generator(question: str):
-    for chunk in maf_agent_instance.ask(question):
+async def stream_generator(question: str, history: List[Message]):
+    # Converte o histórico do formato do frontend para o formato do LangChain
+    chat_history = []
+    for msg in history:
+        if msg.sender == 'user':
+            chat_history.append(HumanMessage(content=msg.text))
+        else: # 'bot'
+            chat_history.append(AIMessage(content=msg.text))
+            
+    # Chama o agente com a pergunta e o histórico convertido
+    async for chunk in maf_agent_instance.ask(question, chat_history):
         yield chunk
         await asyncio.sleep(0.01) # Pequeno delay para não sobrecarregar
 
 @app.post("/ask", summary="Faz uma pergunta ao agente com streaming")
 async def ask_question(request: QuestionRequest):
     """
-    Recebe uma pergunta e retorna a resposta do agente de IA em tempo real (streaming).
+    Recebe uma pergunta e o histórico do chat, e retorna a resposta do agente 
+    de IA em tempo real (streaming).
     """
     if not maf_agent_instance:
         raise HTTPException(status_code=503, detail="Agente não está pronto.")
-    question = request.question
-    return StreamingResponse(stream_generator(question), media_type="text/plain")
+    
+    return StreamingResponse(
+        stream_generator(request.question, request.history), 
+        media_type="text/plain"
+    )
 
 @app.get("/", summary="Endpoint de verificação")
 def read_root():
