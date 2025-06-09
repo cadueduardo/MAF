@@ -14,9 +14,23 @@ export default function Home() {
   
   // Efeito para carregar o histórico do localStorage na inicialização
   useEffect(() => {
-    const storedHistory = localStorage.getItem("maf-chat-history");
-    if (storedHistory) {
-      setConversations(JSON.parse(storedHistory));
+    try {
+      const storedHistory = localStorage.getItem("maf-chat-history");
+      if (storedHistory) {
+        const loadedConversations: Conversation[] = JSON.parse(storedHistory);
+        setConversations(loadedConversations);
+
+        // MODIFICADO: Carrega a última conversa ao iniciar
+        if (loadedConversations.length > 0) {
+          const lastConversation = loadedConversations[loadedConversations.length - 1];
+          setCurrentConversationId(lastConversation.id);
+          setMessages(lastConversation.messages);
+        }
+      }
+    } catch (error) {
+      console.error("Falha ao ler o histórico do chat:", error);
+      // Limpa o histórico corrompido para evitar erros futuros.
+      localStorage.removeItem("maf-chat-history");
     }
   }, []); // Roda apenas uma vez quando o componente é montado
 
@@ -134,6 +148,22 @@ export default function Home() {
     setMessages(conversation.messages);
   };
 
+  // NOVO: Handler para iniciar uma nova conversa
+  const handleNewConversation = () => {
+    setCurrentConversationId(null);
+    setMessages([]);
+  };
+
+  // NOVO: Handler para deletar uma conversa
+  const handleDeleteConversation = (id: string) => {
+    setConversations(prev => prev.filter(convo => convo.id !== id));
+    
+    // Se a conversa deletada era a ativa, limpa a tela de chat
+    if (currentConversationId === id) {
+      handleNewConversation();
+    }
+  };
+
   return (
     <main className="flex h-screen w-screen bg-white dark:bg-slate-950">
       {/* Coluna da Esquerda (Histórico) */}
@@ -142,6 +172,8 @@ export default function Home() {
           conversations={conversations}
           onSelectConversation={handleSelectConversation}
           currentConversationId={currentConversationId}
+          onNewConversation={handleNewConversation}
+          onDeleteConversation={handleDeleteConversation}
         />
       </div>
 
