@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -40,13 +42,17 @@ export function Chat({ messages, isLoading, onSendMessage }: ChatProps) {
             }`}
           >
             <div
-              className={`max-w-xs rounded-lg px-4 py-2 ${
+              className={`max-w-xs md:max-w-md lg:max-w-xl rounded-lg px-4 py-2 ${
                 message.sender === "user"
                   ? "bg-blue-600 text-white"
                   : "bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-50"
               }`}
             >
-              <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+              <div className="prose dark:prose-invert text-sm">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.text}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
         ))}
