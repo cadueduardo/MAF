@@ -107,8 +107,8 @@ class Agent:
                 print("Nenhuma base de conhecimento encontrada. Criando uma nova...")
                 from data_loader import load_documents
                 
-                # Agora carrega tanto dos arquivos locais quanto do site
-                documents = load_documents(path=DATA_PATH, website_url="http://cpe.ind.br")
+                # Carrega todos os documentos (locais e os previamente coletados da web)
+                documents = load_documents(path=DATA_PATH)
                 
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
                 split_documents = text_splitter.split_documents(documents)
