@@ -5,21 +5,19 @@ from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, Di
 from langchain_core.documents import Document
 
 def format_product_data(product_name: str, properties: dict) -> str:
-    """Cria uma string formatada e estruturada para a ficha técnica de um produto."""
+    """Cria uma string de Ficha Técnica estruturada para um produto."""
     lines = [
-        "--- Ficha Técnica do Produto ---",
-        f"**PRODUTO: {product_name.strip()}**\n"
+        "--- INÍCIO DA FICHA TÉCNICA DO PRODUTO ---",
+        f"**PRODUTO: {product_name.strip().upper()}**\n"
     ]
+    
+    # Adiciona as propriedades formatadas
     for key, value in properties.items():
-        # Ignora campos de nome/código redundantes
-        if key.lower() in ['produto', 'nome', 'código']:
-            continue
-        
-        # Formata a chave e o valor de forma limpa
-        formatted_key = key.replace('_', ' ').title()
-        lines.append(f"**{formatted_key}:** {value}")
-        
-    lines.append("--- Fim da Ficha Técnica ---\n")
+        if str(value).strip(): # Garante que não adicionemos valores vazios
+            lines.append(f"**{key.strip().title()}:** {str(value).strip()}")
+            
+    lines.append(f"\n**FIM DA FICHA TÉCNICA DO PRODUTO: {product_name.strip().upper()}**")
+    lines.append("--- FIM DA FICHA TÉCNICA ---")
     return "\n".join(lines)
 
 def load_product_json(file_path: str) -> list[Document]:
@@ -28,17 +26,18 @@ def load_product_json(file_path: str) -> list[Document]:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        # Encontra o nome do produto em chaves comuns
         product_name = ""
         possible_keys = ['produto', 'nome do produto', 'nome', 'product', 'product name', 'código']
         for key in possible_keys:
-            if key in data:
-                product_name = data[key]
+            for data_key in data.keys():
+                if key == data_key.lower():
+                    product_name = data.pop(data_key) # Remove a chave do nome para não duplicar
+                    break
+            if product_name:
                 break
         
         if not product_name:
-            # Se não encontrar um nome óbvio, pula o arquivo para evitar dados ruins.
-            print(f"Aviso: Nome do produto não encontrado no arquivo {os.path.basename(file_path)}, pulando.")
+            print(f"Aviso: Nome do produto não encontrado no JSON {os.path.basename(file_path)}, pulando.")
             return []
 
         page_content = format_product_data(product_name, data)
@@ -48,32 +47,58 @@ def load_product_json(file_path: str) -> list[Document]:
         return []
 
 def load_product_docx(file_path: str) -> list[Document]:
-    """Lê um arquivo DOCX, extrai o nome do produto do título e formata suas propriedades."""
+    """Lê uma Ficha Técnica DOCX, extrai o nome do produto e suas propriedades de forma estruturada."""
     try:
-        # Usa o Docx2txtLoader para pegar o texto puro
         loader = Docx2txtLoader(file_path)
         text = loader.load()[0].page_content
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
 
-        # Pega o nome do produto da primeira linha (geralmente é o título)
-        lines = text.split('\n')
-        product_name = lines[0].strip() if lines else "Nome Desconhecido"
-        
-        # Cria um dicionário com as propriedades encontradas no texto
+        product_name = "Nome Desconhecido"
         properties = {}
-        for line in lines[1:]:
-            line = line.strip()
-            # Procura por padrões como "Chave: Valor"
-            match = re.match(r'([^:]+):\s*(.*)', line)
+
+        # Procura pelo nome do produto de forma mais robusta
+        for line in lines:
+            match = re.search(r"Produto:\s*(.*?)(?:\s*Cor:.*)?$", line, re.IGNORECASE)
             if match:
-                key, value = match.groups()
-                properties[key.strip()] = value.strip()
+                product_name = match.group(1).strip()
+                break
         
-        if not properties:
-            # Se não encontrou propriedades estruturadas, usa o texto como está, mas com o nome do produto no topo
-            page_content = f"**PRODUTO: {product_name}**\n\n{text}"
-        else:
-            page_content = format_product_data(product_name, properties)
-            
+        # Se não achou, usa a primeira linha como último recurso
+        if product_name == "Nome Desconhecido" and lines:
+            product_name = lines[0]
+
+        # Extrai todos os pares "Chave: Valor" e os dados da tabela
+        in_table = False
+        for line in lines:
+            # Pares simples (ex: "Cor: Jet Black")
+            match_kv = re.match(r'^([^:]+):\s*(.+)$', line)
+            if match_kv:
+                key, value = match_kv.groups()
+                # Ignora o próprio nome do produto e cabeçalhos de seção
+                if key.strip().lower() not in ['produto', 'propriedades', 'mecânicas', 'impacto', 'térmicas', 'outros']:
+                    properties[key.strip()] = value.strip()
+
+            # Lógica para entrar na tabela de propriedades
+            if any(header in line.lower() for header in ['método', 'unidade', 'valores típicos']):
+                in_table = True
+                continue
+            if "observação" in line.lower():
+                in_table = False # Fim da tabela
+
+            # Se estamos na tabela, extrai os dados dela
+            if in_table:
+                parts = re.split(r'\s{2,}', line) # Divide por 2 ou mais espaços
+                if len(parts) >= 2:
+                    prop_name = parts[0].strip()
+                    prop_value = parts[-1].strip()
+                    if prop_name and prop_value:
+                        properties[prop_name] = prop_value
+        
+        if product_name == "Nome Desconhecido":
+            print(f"Aviso: Não foi possível determinar o nome do produto em {os.path.basename(file_path)}. Pulando.")
+            return []
+        
+        page_content = format_product_data(product_name, properties)
         return [Document(page_content=page_content, metadata={"source": file_path})]
     except Exception as e:
         print(f"Erro ao processar o arquivo DOCX {os.path.basename(file_path)}: {e}")
@@ -102,7 +127,7 @@ def load_documents(path: str):
     # Mapeia os diretórios para as funções de processamento corretas
     directory_map = {
         "json": load_product_json,
-        "DTS": load_product_docx, # Supondo que DOCX estejam em DTS
+        "DTS": load_product_docx,
         "scraped": load_scraped_json,
     }
 
@@ -114,17 +139,21 @@ def load_documents(path: str):
             for filename in os.listdir(full_path):
                 file_path = os.path.join(full_path, filename)
                 if os.path.isfile(file_path):
-                    # Chama a função específica para cada tipo de arquivo
-                    processed_docs = loader_func(file_path)
-                    all_docs.extend(processed_docs)
-    
-    # Carrega PDFs de forma genérica, se existirem
+                    # Chama a função específica para o tipo de arquivo
+                    if subdir == "DTS" and filename.endswith('.docx'):
+                        all_docs.extend(load_product_docx(file_path))
+                    elif subdir == "json":
+                        all_docs.extend(load_product_json(file_path))
+                    elif subdir == "scraped":
+                         all_docs.extend(load_scraped_json(file_path))
+
+    # Carrega PDFs de forma genérica, se existirem na pasta DTS
     pdf_path = os.path.join(path, "DTS")
     if os.path.exists(pdf_path):
-        pdf_loader = DirectoryLoader(pdf_path, glob="*.pdf", loader_cls=PyPDFLoader, silent_errors=True)
+        pdf_loader = DirectoryLoader(pdf_path, glob="*.pdf", loader_cls=PyPDFLoader, silent_errors=True, show_progress=False, use_multithreading=True)
         pdf_docs = pdf_loader.load()
         if pdf_docs:
-            print(f"Carregados {len(pdf_docs)} documentos PDF de {pdf_path}")
+            print(f"Carregados {len(pdf_docs)} documentos PDF de forma genérica.")
             all_docs.extend(pdf_docs)
 
     print(f"Total de {len(all_docs)} documentos carregados e formatados para processamento.")
