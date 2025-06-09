@@ -48,11 +48,18 @@ export function Chat({ messages, isLoading, onSendMessage }: ChatProps) {
                   : "bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-50"
               }`}
             >
-              <div className="prose dark:prose-invert text-sm">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.text}
-                </ReactMarkdown>
-              </div>
+              {message.sender === 'bot' ? (
+                <div 
+                  className="prose dark:prose-invert text-sm" 
+                  dangerouslySetInnerHTML={{ __html: message.text }} 
+                />
+              ) : (
+                <div className="prose dark:prose-invert text-sm">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.text}
+                  </ReactMarkdown>
+                </div>
+              )}
             </div>
           </div>
         ))}
