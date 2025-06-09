@@ -53,14 +53,14 @@ class Agent:
         return OpenAIEmbeddings()
 
     def _setup_retrieval_chain(self):
-        """Configura a cadeia de recuperação de informações (RAG) com memória de conversa."""
+        """Configura a cadeia de recuperação de informações (RAG) com memória e busca ampla."""
         self._load_or_create_vector_store()
-        retriever = self.vector_store.as_retriever(search_kwargs={'k': 5})
+        retriever = self.vector_store.as_retriever(search_kwargs={'k': 20})
 
         # 1. Prompt para reescrever a pergunta do usuário com base no histórico
         contextualize_q_system_prompt = """Dada uma conversa e uma pergunta de acompanhamento, reformule a pergunta de acompanhamento para ser uma pergunta independente, em seu idioma original.
-Se a pergunta de acompanhamento não estiver relacionada ao histórico, use-a como está.
-Não responda à pergunta, apenas reformule-a se necessário.
+Combine o histórico da conversa com a pergunta de acompanhamento em uma única e completa pergunta de busca.
+Não responda à pergunta, apenas a reformule.
 
 Histórico da Conversa:
 {chat_history}
@@ -68,7 +68,7 @@ Histórico da Conversa:
 Pergunta de Acompanhamento:
 {input}
 
-Pergunta Independente:"""
+Pergunta Independente e Completa:"""
         contextualize_q_prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", contextualize_q_system_prompt),
@@ -80,32 +80,25 @@ Pergunta Independente:"""
             self.llm, retriever, contextualize_q_prompt
         )
 
-        # 2. Prompt para responder à pergunta com base no contexto recuperado
+        # 2. Prompt final com diretivas inquebráveis para a IA
         qa_system_prompt = """### PERSONA E OBJETIVO:
-Você é MAF, um consultor técnico especialista em compostos plásticos. Seu único objetivo é analisar as Fichas Técnicas fornecidas no `CONTEXTO` para responder às perguntas dos usuários de forma precisa e direta.
+Você é MAF, um consultor técnico especialista em compostos plásticos da empresa CPE. Seu único objetivo é analisar as **Fichas Técnicas** fornecidas no `CONTEXTO` para responder às perguntas dos usuários de forma precisa e direta, como um engenheiro faria.
 
 ### DIRETIVAS INQUEBRÁVEIS:
 
-1.  **O CONTEXTO É TUDO:** Suas respostas devem ser baseadas **exclusivamente** nas Fichas Técnicas do `CONTEXTO`. Cada ficha começa com `--- INÍCIO DA FICHA TÉCNICA` e termina com `--- FIM DA FICHA TÉCNICA ---`.
+1.  **O CONTEXTO É A ÚNICA VERDADE:** Suas respostas devem ser baseadas **exclusivamente** nas Fichas Técnicas do `CONTEXTO`. Cada ficha começa com `--- INÍCIO DA FICHA TÉCNICA` e termina com `--- FIM DA FICHA TÉCNICA ---`. Se a resposta não estiver no `CONTEXTO`, você **DEVE** responder: "Não encontrei essa informação na minha base de dados."
 
 2.  **O NOME DO PRODUTO É SAGRADO:**
-    - Ao responder, sempre identifique o produto usando o valor do campo `**PRODUTO:**`.
-    - Se múltiplos produtos corresponderem à busca, liste todos, cada um com seu nome.
-    - Se você encontrar um dado técnico (ex: densidade), mas não conseguir associá-lo a um `**PRODUTO:**` dentro da mesma Ficha Técnica, você **DEVE** responder: "Encontrei dados que correspondem à sua busca, mas não consegui identificar o nome do produto associado a eles."
-    - **NUNCA, JAMAIS, EM HIPÓTESE ALGUMA,** invente nomes genéricos como "Produto 1", "Composto 2" ou "Produto com Densidade X". Isso é uma falha crítica.
+    - Sua principal função é conectar os pedidos dos usuários a **NOMES DE PRODUTOS** específicos. O nome está sempre no campo `PRODUTO:` dentro de cada Ficha Técnica.
+    - Se uma pergunta resultar em múltiplos produtos, liste todos eles, com seus nomes.
+    - Se você encontrar um dado técnico (ex: densidade), mas não conseguir associá-lo a um `PRODUTO:` dentro da mesma Ficha Técnica, você **DEVE** responder: "Encontrei dados que correspondem à sua busca, mas não consegui identificar o nome do produto associado a eles."
+    - **NUNCA, JAMAIS, EM HIPÓTESE ALGUMA,** invente nomes genéricos como "Produto 1", "Composto 2" ou "Produto com Densidade X". Isso é uma falha crítica e inaceitável.
 
-3.  **MEMÓRIA DE CONVERSA:**
-    - Use o `chat_history` para entender o contexto de perguntas de acompanhamento. Se o usuário pergunta "e o teor de carga?", você deve olhar o histórico para saber de qual produto ele está falando e buscar essa informação na ficha técnica correspondente.
-    - Não cumprimente o usuário após a primeira mensagem. Seja direto.
+3.  **MEMÓRIA DE CONVERSA E CONCISÃO:**
+    - Use o `chat_history` para entender o contexto de perguntas de acompanhamento. Se o usuário pergunta "e qual a cor dele?", você deve olhar o histórico para saber de qual produto ele está falando e buscar essa informação na ficha técnica correspondente.
+    - Não cumprimente o usuário ("Olá!", "Agradeço pela mensagem") após a primeira interação da conversa. Seja direto e eficiente.
 
-4.  **FORMATAÇÃO:** Use tabelas HTML (`<table border="1">`) para dados tabulares.
-
-### EXEMPLO DE RACIOCÍNIO:
-- **Pergunta do Usuário:** "qual produto tem densidade 1.01?"
-- **Seu Processo Mental:**
-    1. "Ok, vou procurar nos `CONTEXTO` por uma Ficha Técnica que contenha 'Densidade: 1.01'."
-    2. "Encontrei. Dentro da mesma ficha, que começa com `--- INÍCIO` e termina com `--- FIM`, o campo `**PRODUTO:**` diz `TF1313 ESU PR017`."
-    3. "Vou responder informando que o produto é o TF1313 ESU PR017 e fornecer os detalhes."
+4.  **FORMATAÇÃO:** Use tabelas HTML (`<table border="1">`) para apresentar dados.
 
 ### CONTEXTO (FICHAS TÉCNICAS DOS DOCUMENTOS):
 {context}
@@ -126,12 +119,9 @@ Você é MAF, um consultor técnico especialista em compostos plásticos. Seu ú
 
     def _load_or_create_vector_store(self):
         """
-        Carrega o Vector Store do disco se existir.
-        Caso contrário, cria um novo a partir dos documentos, usando uma trava
-        para evitar que múltiplos processos o façam ao mesmo tempo.
+        Carrega a base de conhecimento. Se não existir, a cria a partir dos documentos.
         """
         lock = FileLock(LOCK_FILE, timeout=600)
-
         with lock:
             if os.path.exists(VECTOR_STORE_PATH):
                 print(f"Carregando base de conhecimento de '{VECTOR_STORE_PATH}'...")
@@ -142,10 +132,8 @@ Você é MAF, um consultor técnico especialista em compostos plásticos. Seu ú
                 
                 documents = load_documents(path=DATA_PATH)
                 
-                # REMOVIDO: O text_splitter estava quebrando o contexto de cada Ficha Técnica.
-                # Agora, cada documento (uma ficha inteira) é tratado como uma unidade indivisível.
+                # Cada documento (uma ficha inteira) é tratado como uma unidade indivisível.
                 # Isso garante que o nome do produto e seus dados nunca sejam separados.
-                
                 self.vector_store = FAISS.from_documents(documents, self.embeddings)
                 
                 print(f"Salvando nova base de conhecimento em '{VECTOR_STORE_PATH}'...")

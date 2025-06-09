@@ -1,28 +1,30 @@
 import os
 import re
 import json
-from langchain_community.document_loaders import Docx2txtLoader, DirectoryLoader, PyPDFLoader
+from langchain_community.document_loaders import Docx2txtLoader
 from langchain_core.documents import Document
 
 def format_product_data(product_name: str, properties: dict) -> str:
-    """Cria uma Ficha Técnica de Produto em texto, clara e bem estruturada."""
+    """Cria uma Ficha Técnica de Produto em texto, otimizada para a IA."""
     lines = [
-        "--- INÍCIO DA FICHA TÉCNICA ---",
-        f"PRODUTO: {product_name.strip().upper()}"
+        f"--- INÍCIO DA FICHA TÉCNICA DO PRODUTO: {product_name.upper()} ---"
     ]
+    
+    # Garante que o nome do produto esteja no topo, se já não estiver.
+    properties['Produto'] = product_name 
     
     # Adiciona as propriedades formatadas, garantindo que não haja valores vazios
     for key, value in properties.items():
         clean_key = key.replace('_', ' ').strip().title()
         clean_value = str(value).strip()
-        if clean_key and clean_value and clean_key.lower() != 'produto':
+        if clean_key and clean_value:
             lines.append(f"{clean_key}: {clean_value}")
             
-    lines.append("--- FIM DA FICHA TÉCNICA ---")
+    lines.append(f"--- FIM DA FICHA TÉCNICA DO PRODUTO: {product_name.upper()} ---")
     return "\n".join(lines)
 
 def parse_product_json(file_path: str) -> list[Document]:
-    """Lê um arquivo JSON, extrai e achata suas propriedades para o formato de Ficha Técnica."""
+    """Lê um JSON, achata suas propriedades e o transforma em uma Ficha Técnica estruturada."""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -30,7 +32,7 @@ def parse_product_json(file_path: str) -> list[Document]:
         product_name = data.get('Produto', os.path.basename(file_path).split('.')[0])
         properties = {}
 
-        # Itera pelo JSON para achatar os dados em um dicionário simples
+        # Itera pelo JSON para achatar os dados em um dicionário simples de chave-valor
         for key, value in data.items():
             if isinstance(value, dict) and key == "Propriedades":
                 for prop_category in value.values():
@@ -45,60 +47,54 @@ def parse_product_json(file_path: str) -> list[Document]:
                 properties[key] = value
 
         page_content = format_product_data(product_name, properties)
-        return [Document(page_content=page_content, metadata={"source": file_path})]
+        return [Document(page_content=page_content, metadata={"source": file_path, "product_name": product_name})]
 
     except Exception as e:
         print(f"Erro ao processar o arquivo JSON {os.path.basename(file_path)}: {e}")
         return []
 
 def parse_product_docx(file_path: str) -> list[Document]:
-    """Lê uma Ficha Técnica DOCX e extrai suas propriedades de forma estruturada."""
+    """Lê uma Ficha Técnica DOCX e a transforma em um dicionário de propriedades estruturado."""
     try:
         text = Docx2txtLoader(file_path).load()[0].page_content
         lines = [line.strip() for line in text.split('\n') if line.strip()]
 
-        product_name = os.path.basename(file_path).split('.')[0] # Fallback
+        product_name = os.path.basename(file_path).split('.')[0] # Nome fallback
         properties = {}
 
-        # Procura por 'Produto: NOME_PRODUTO'
+        # Encontra o nome do produto de forma mais precisa
         for line in lines:
             if line.lower().startswith("produto:"):
-                product_name = line.split(":", 1)[1].strip()
+                product_name = line.split(":", 1)[1].strip().split("Cor:")[0].strip()
                 break
         
-        # Extrai outros pares chave:valor e dados da tabela
-        in_table_section = False
+        # Extrai todos os pares chave:valor e dados da tabela
         for line in lines:
-            if re.match(r'propriedades|método|unidade|valores', line, re.I):
-                in_table_section = True
-                continue
-            if 'observação' in line.lower():
-                in_table_section = False
-
-            if in_table_section:
-                # Na tabela, a primeira e a última coluna são as mais importantes
-                parts = re.split(r'\s{2,}', line) # Divide por 2+ espaços
+            # Pares simples como 'Cor: Preto'
+            match = re.match(r'^([^:]+):\s*(.+)$', line)
+            if match:
+                key, value = match.groups()
+                # Remove o nome do produto das propriedades para evitar redundância
+                if key.lower() != 'produto':
+                    properties[key] = value
+            # Lógica da tabela
+            else:
+                parts = re.split(r'\s{2,}', line)
                 if len(parts) >= 2:
                     prop_name, prop_value = parts[0], parts[-1]
-                    if prop_name and prop_value:
+                    # Filtra cabeçalhos comuns da tabela
+                    if prop_name.lower() not in ['propriedades', 'método', 'unidade', 'valores típicos']:
                         properties[prop_name] = prop_value
-            else:
-                # Pares simples como 'Cor: Preto'
-                match = re.match(r'^([^:]+):\s*(.+)$', line)
-                if match:
-                    key, value = match.groups()
-                    if key.lower() != 'produto':
-                        properties[key] = value
 
         page_content = format_product_data(product_name, properties)
-        return [Document(page_content=page_content, metadata={"source": file_path})]
+        return [Document(page_content=page_content, metadata={"source": file_path, "product_name": product_name})]
 
     except Exception as e:
         print(f"Erro ao processar o arquivo DOCX {os.path.basename(file_path)}: {e}")
         return []
 
 def load_documents(path: str):
-    """Ponto de entrada que carrega e formata todos os documentos de produtos."""
+    """Ponto de entrada que carrega e traduz todas as Fichas Técnicas."""
     print("Iniciando o tradutor de Fichas Técnicas...")
     all_docs = []
     
@@ -106,7 +102,7 @@ def load_documents(path: str):
     json_path = os.path.join(path, "json")
     if os.path.exists(json_path):
         print(f"Traduzindo arquivos de: {json_path}")
-        for filename in sorted(os.listdir(json_path)): # 'sorted' para consistência
+        for filename in sorted(os.listdir(json_path)):
             if filename.endswith('.json'):
                 all_docs.extend(parse_product_json(os.path.join(json_path, filename)))
 
