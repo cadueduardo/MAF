@@ -1,15 +1,31 @@
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from agent import Agent
 from fastapi.responses import StreamingResponse
 import asyncio
 
-# Inicializa a API FastAPI
+# Variável para armazenar a instância do agente
+maf_agent_instance = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Código a ser executado na inicialização
+    global maf_agent_instance
+    print("Inicializando o Agente MAF (isso pode levar alguns minutos na primeira vez)...")
+    maf_agent_instance = Agent()
+    print("Agente MAF pronto para receber requisições.")
+    yield
+    # Código a ser executado no desligamento (se necessário)
+    print("Encerrando a aplicação.")
+
+# Inicializa a API FastAPI com o gerenciador de ciclo de vida
 app = FastAPI(
     title="MAF API",
     description="API para o My Agent Friend, um consultor de produtos com IA.",
     version="0.1.0",
+    lifespan=lifespan
 )
 
 # --- Configuração do CORS ---
@@ -32,15 +48,9 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
 
-# Inicializa o nosso agente de IA.
-# Isso pode levar um momento na primeira vez, pois ele criará a base de conhecimento.
-print("Inicializando o Agente MAF...")
-maf_agent = Agent()
-print("Agente MAF pronto para receber requisições.")
-
 # Função geradora assíncrona para o streaming
 async def stream_generator(question: str):
-    for chunk in maf_agent.ask(question):
+    for chunk in maf_agent_instance.ask(question):
         yield chunk
         await asyncio.sleep(0.01) # Pequeno delay para não sobrecarregar
 
@@ -49,6 +59,8 @@ async def ask_question(request: QuestionRequest):
     """
     Recebe uma pergunta e retorna a resposta do agente de IA em tempo real (streaming).
     """
+    if not maf_agent_instance:
+        raise HTTPException(status_code=503, detail="Agente não está pronto.")
     question = request.question
     return StreamingResponse(stream_generator(question), media_type="text/plain")
 
@@ -64,7 +76,9 @@ def suggest_questions():
     """
     Retorna uma lista de perguntas sugeridas geradas pela IA.
     """
-    suggestions = maf_agent.get_suggested_questions()
+    if not maf_agent_instance:
+        raise HTTPException(status_code=503, detail="Agente não está pronto.")
+    suggestions = maf_agent_instance.get_suggested_questions()
     return {"suggestions": suggestions}
 
 if __name__ == "__main__":

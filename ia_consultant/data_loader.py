@@ -29,6 +29,7 @@ def load_json_docs(path: str):
                     json_docs.append(Document(page_content=text_content, metadata={"source": file_path}))
             except Exception as e:
                 print(f"Erro ao carregar o arquivo JSON {filename}: {e}")
+    print(f"Carregados {len(json_docs)} documentos de {path}")
     return json_docs
 
 def load_individual_document_types(data_path: str):
