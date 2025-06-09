@@ -132,45 +132,36 @@ class Agent:
             return []
 
         try:
-            # Pega alguns documentos aleatórios da base de dados para dar contexto
-            retriever = self.vector_store.as_retriever(search_kwargs={'k': 5})
-            # Busca por um termo mais específico para obter documentos relevantes
-            all_docs = retriever.get_relevant_documents("compostos plásticos para indústria automotiva")
+            # Pega 3 documentos aleatórios da base de dados.
+            # O FAISS não tem um método "sample", então usamos uma pequena busca com k=10
+            # e pegamos uma amostra aleatória dos resultados.
+            retriever = self.vector_store.as_retriever(search_kwargs={'k': 10})
+            all_docs = retriever.get_relevant_documents("compostos plásticos")
             
-            # Garante que temos documentos suficientes para a amostra
             sample_size = min(3, len(all_docs))
-            if sample_size == 0:
-                return []
-
+            if sample_size == 0: return []
             sampled_docs = random.sample(all_docs, sample_size)
 
             # Template do prompt para gerar perguntas
             suggestion_template = """
-            Com base nos trechos de documentos abaixo, que descrevem principalmente compostos plásticos e matéria-prima para a indústria automotiva, gere exatamente 3 perguntas que um cliente (como um engenheiro ou comprador técnico) faria.
-            Foque em aspectos como aplicação do material, propriedades técnicas, compatibilidade e fornecimento. Evite tópicos secundários como móveis ou cadeiras, a menos que seja o único assunto dos trechos.
-            Retorne apenas as perguntas, uma por linha, sem numeração ou marcadores.
+            Com base no trecho de documento abaixo, gere UMA única pergunta curta e direta que um cliente poderia fazer sobre o assunto.
+            Retorne apenas a pergunta, sem saudações ou texto adicional.
 
-            Exemplo de formato da resposta:
-            Qual a resistência a impacto do composto XPTO-123?
-            Esse polímero é adequado para peças de painel automotivo?
-            Vocês fornecem este material em pellets?
-
-            Documentos:
+            Documento:
             {context}
 
-            Perguntas Sugeridas:
+            Pergunta Sugerida:
             """
             suggestion_prompt = ChatPromptTemplate.from_template(suggestion_template)
-
-            # Cria uma cadeia simples apenas para esta tarefa
             suggestion_chain = create_stuff_documents_chain(self.llm, suggestion_prompt)
             
-            response = suggestion_chain.invoke({"context": sampled_docs})
+            suggestions = []
+            for doc in sampled_docs:
+                response = suggestion_chain.invoke({"context": [doc]}) # Passa um único doc por vez
+                if response:
+                    suggestions.append(response.strip())
             
-            # Processa a resposta para retornar uma lista de strings
-            suggestions = response.strip().split('\n')
-            # Filtra linhas vazias que possam aparecer
-            return [s.strip() for s in suggestions if s.strip()]
+            return suggestions
 
         except Exception as e:
             print(f"Erro ao gerar perguntas sugeridas: {e}")

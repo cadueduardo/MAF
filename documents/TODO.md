@@ -18,14 +18,20 @@ Esta lista documenta o progresso do desenvolvimento do projeto My Agent Friend.
 ## ⏳ Próximos Passos
 
 ### Frontend (MVP)
--   [ ] **Inicializar o Projeto**: Criar a aplicação frontend usando Next.js, TypeScript e Tailwind CSS.
--   [ ] **Instalar Magic UI**: Adicionar as bibliotecas do Magic UI ao projeto frontend.
--   [ ] **Construir a Interface do Chat**: Desenvolver os componentes visuais para a caixa de diálogo do chat (input de texto, área de mensagens, etc.).
--   [ ] **Conectar com a API**: Implementar a lógica no frontend para chamar o endpoint `http://localhost:8000/ask` do backend.
--   [ ] **Gerenciar Estado do Chat**: Controlar o histórico de mensagens e o estado de "digitando..." na interface.
--   [ ] **Estilização Final**: Refinar o visual do chat para uma experiência de usuário agradável.
+-   [x] **Inicializar o Projeto**: Criar a aplicação frontend usando Next.js, TypeScript e Tailwind CSS.
+-   [x] **Instalar Componentes de UI**: Adicionar as bibliotecas de componentes (shadcn/ui) ao projeto frontend.
+-   [x] **Construir a Interface do Chat**: Desenvolver os componentes visuais para a caixa de diálogo do chat.
+-   [x] **Conectar com a API**: Implementar a lógica no frontend para chamar o endpoint do backend.
+-   [x] **Gerenciar Estado do Chat**: Controlar o histórico de mensagens e o estado de "digitando...".
+-   [x] **Deploy e Configuração**: Publicar a aplicação em um subdomínio com Nginx e HTTPS.
 
-### Futuro e Melhorias
+## 🚀 Futuro e Melhorias (Plataforma SaaS)
+
+-   [ ] **Arquitetura Multi-Tenant**: Evoluir o backend para uma plataforma SaaS capaz de servir múltiplos clientes.
+    -   [ ] **Banco de Dados Central**: Implementar PostgreSQL para gerenciar clientes, configurações de IA (chaves de API criptografadas) e fontes de dados.
+    -   [ ] **Painel de Administração do Cliente**: Desenvolver uma interface web para que clientes possam fazer login, gerenciar suas chaves de LLM e fontes de conhecimento (upload de arquivos, adição de URLs de sites).
+    -   [ ] **Processamento em Segundo Plano**: Utilizar uma fila de tarefas (Celery/Redis) para lidar com a indexação de conteúdo sem travar a interface.
+    -   [ ] **Autenticação Segura**: Implementar um sistema de API Keys para autenticação de clientes na plataforma.
+
 -   [ ] **Plugin WordPress**: Desenhar e desenvolver um plugin para integrar facilmente o chat MAF em sites WordPress.
--   [ ] **Arquitetura Multi-Tenant**: Evoluir o backend para suportar múltiplos clientes de forma segura e isolada.
 -   [ ] **Suporte a Novos Formatos**: Expandir o `data_loader` para incluir PDFs, imagens e transcrição de áudio/vídeo. 
