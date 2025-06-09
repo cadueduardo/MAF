@@ -149,7 +149,7 @@ Você é MAF, um consultor técnico especialista em compostos plásticos. Sua co
                 print(f"Salvando nova base de conhecimento em '{VECTOR_STORE_PATH}'...")
                 self.vector_store.save_local(VECTOR_STORE_PATH)
 
-    def ask(self, question: str, chat_history: list):
+    async def ask(self, question: str, chat_history: list):
         """
         Faz uma pergunta ao agente e retorna um gerador que transmite a resposta.
         O histórico é uma lista de mensagens HumanMessage e AIMessage.
@@ -159,7 +159,8 @@ Você é MAF, um consultor técnico especialista em compostos plásticos. Sua co
             return
         
         # O LangChain já nos entrega o "delta" em cada chunk.
-        for chunk in self.retrieval_chain.stream(
+        # MODIFICADO: usa 'astream' para compatibilidade com a API assíncrona.
+        async for chunk in self.retrieval_chain.astream(
             {"input": question, "chat_history": chat_history}
         ):
             if 'answer' in chunk:
@@ -216,19 +217,6 @@ if __name__ == "__main__":
     print("\n--- Agente MAF Pronto ---")
     print("Faça sua pergunta ou digite 'sair' para terminar.")
 
-    while True:
-        user_question = input("\nVocê: ")
-        if user_question.lower() == 'sair':
-            break
-        
-        full_response = ""
-        # Itera sobre o gerador para obter a resposta completa
-        for part in maf_agent.ask(user_question, chat_history_test):
-            print(part, end="", flush=True)
-            full_response += part
-        
-        # Adiciona a pergunta e a resposta completa ao histórico de teste
-        chat_history_test.append(HumanMessage(content=user_question))
-        chat_history_test.append(AIMessage(content=full_response))
-        
-        print() # Nova linha para a próxima pergunta 
+    # Loop principal para teste local foi removido porque o 'ask' agora é assíncrono
+    # e não pode ser chamado diretamente em um loop síncrono simples.
+    # O teste deve ser feito através da API. 
