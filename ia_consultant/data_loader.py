@@ -1,145 +1,133 @@
 import os
-from langchain_community.document_loaders import (
-    DirectoryLoader,
-    PyPDFLoader,
-    Docx2txtLoader,
-)
-from langchain_core.documents import Document
+import re
 import json
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, DirectoryLoader
+from langchain_core.documents import Document
 
-def format_product_json(data: dict) -> str:
-    """
-    Formata um dicionário JSON de um produto em uma string de texto legível,
-    garantindo que o nome do produto e suas propriedades estejam claramente associados.
-    """
-    lines = []
-    
-    # Tenta encontrar o nome do produto com várias chaves possíveis, ignorando maiúsculas/minúsculas.
-    product_name = ""
-    # Chaves comuns para nomes de produtos em português e inglês.
-    possible_name_keys = ['produto', 'nome do produto', 'nome', 'product', 'product name', 'código']
-    
-    found_name_key = None
-    for key in possible_name_keys:
-        for data_key in data.keys():
-            if data_key.lower() == key:
-                product_name = data[data_key]
-                found_name_key = data_key
-                break
-        if product_name:
-            break
-            
-    # Adiciona um cabeçalho claro para o LLM
-    lines.append("--- Ficha Técnica do Produto ---")
-    if product_name:
-        lines.append(f"**Nome do Produto:** {product_name}")
-    
-    # Itera sobre todos os dados e os formata
-    for key, value in data.items():
-        if key == found_name_key:
-            continue # Pula a chave do nome, pois já foi adicionada.
-            
-        formatted_key = key.replace('_', ' ').title()
-        
-        if isinstance(value, dict):
-            lines.append(f"\n**{formatted_key}:**")
-            for sub_key, sub_value in value.items():
-                lines.append(f"  - {sub_key.replace('_', ' ').title()}: {sub_value}")
-        elif isinstance(value, list):
-            lines.append(f"\n**{formatted_key}:**")
-            for item in value:
-                lines.append(f"  - {item}")
-        else:
-            lines.append(f"**{formatted_key}:** {value}")
-            
-    lines.append("--- Fim da Ficha Técnica ---")
-    return "\n\n".join(lines)
-
-def load_json_docs(path: str):
-    """
-    Carrega arquivos JSON de um diretório.
-    Ele consegue processar tanto os JSONs de produtos (um objeto por arquivo)
-    quanto os JSONs do web scraper (uma lista de documentos por arquivo).
-    """
-    json_docs = []
-    if not os.path.exists(path):
-        # Não imprime nada se o diretório não existe, pois é esperado
-        # que o diretório 'scraped' possa não existir na primeira execução.
-        return json_docs
-        
-    for filename in os.listdir(path):
-        if filename.endswith('.json'):
-            file_path = os.path.join(path, filename)
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                    # Se o JSON for uma lista de objetos (formato do scrape)
-                    if isinstance(data, list):
-                        for item in data:
-                            if "page_content" in item and "metadata" in item:
-                                json_docs.append(Document(page_content=item["page_content"], metadata=item["metadata"]))
-                    # Se for um dicionário (formato original de produto)
-                    elif isinstance(data, dict):
-                        # MODIFICADO: Usa a nova função para formatar o JSON de produto em texto legível.
-                        text_content = format_product_json(data)
-                        json_docs.append(Document(page_content=text_content, metadata={"source": file_path}))
-
-            except Exception as e:
-                print(f"Erro ao carregar o arquivo JSON {filename}: {e}")
-                
-    if json_docs:
-        print(f"Carregados {len(json_docs)} documentos de {path}")
-    return json_docs
-
-def load_individual_document_types(data_path: str):
-    """Carrega documentos de subdiretórios específicos (json, DTS, e os novos 'scraped')."""
-    all_docs = []
-    
-    # 1. Carrega JSONs de produtos
-    json_path = os.path.join(data_path, "json")
-    all_docs.extend(load_json_docs(json_path))
-    
-    # 2. Carrega o conteúdo da web previamente coletado
-    scraped_path = os.path.join(data_path, "scraped")
-    all_docs.extend(load_json_docs(scraped_path))
-    
-    # 3. Define os caminhos e os loaders para outros tipos de arquivo (DOCX, PDF)
-    configs = [
-        {"path": os.path.join(data_path, "DTS"), "glob": "*.docx", "loader_cls": Docx2txtLoader},
-        {"path": os.path.join(data_path, "DTS"), "glob": "*.pdf", "loader_cls": PyPDFLoader},
+def format_product_data(product_name: str, properties: dict) -> str:
+    """Cria uma string formatada e estruturada para a ficha técnica de um produto."""
+    lines = [
+        "--- Ficha Técnica do Produto ---",
+        f"**PRODUTO: {product_name.strip()}**\n"
     ]
+    for key, value in properties.items():
+        # Ignora campos de nome/código redundantes
+        if key.lower() in ['produto', 'nome', 'código']:
+            continue
+        
+        # Formata a chave e o valor de forma limpa
+        formatted_key = key.replace('_', ' ').title()
+        lines.append(f"**{formatted_key}:** {value}")
+        
+    lines.append("--- Fim da Ficha Técnica ---\n")
+    return "\n".join(lines)
 
-    for config in configs:
-        if os.path.exists(config["path"]):
-            loader = DirectoryLoader(
-                config["path"],
-                glob=config["glob"],
-                loader_cls=config["loader_cls"],
-                show_progress=False, # Mantém False para logs limpos
-                use_multithreading=True
-            )
-            try:
-                docs = loader.load()
-                print(f"Carregados {len(docs)} documentos de {config['path']}/{config['glob']}")
-                all_docs.extend(docs)
-            except Exception as e:
-                print(f"Erro ao carregar documentos de {config['path']}/{config['glob']}: {e}")
+def load_product_json(file_path: str) -> list[Document]:
+    """Lê um arquivo JSON de produto e o transforma em um Documento LangChain formatado."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Encontra o nome do produto em chaves comuns
+        product_name = ""
+        possible_keys = ['produto', 'nome do produto', 'nome', 'product', 'product name', 'código']
+        for key in possible_keys:
+            if key in data:
+                product_name = data[key]
+                break
+        
+        if not product_name:
+            # Se não encontrar um nome óbvio, pula o arquivo para evitar dados ruins.
+            print(f"Aviso: Nome do produto não encontrado no arquivo {os.path.basename(file_path)}, pulando.")
+            return []
+
+        page_content = format_product_data(product_name, data)
+        return [Document(page_content=page_content, metadata={"source": file_path})]
+    except Exception as e:
+        print(f"Erro ao processar o arquivo JSON {os.path.basename(file_path)}: {e}")
+        return []
+
+def load_product_docx(file_path: str) -> list[Document]:
+    """Lê um arquivo DOCX, extrai o nome do produto do título e formata suas propriedades."""
+    try:
+        # Usa o Docx2txtLoader para pegar o texto puro
+        loader = Docx2txtLoader(file_path)
+        text = loader.load()[0].page_content
+
+        # Pega o nome do produto da primeira linha (geralmente é o título)
+        lines = text.split('\n')
+        product_name = lines[0].strip() if lines else "Nome Desconhecido"
+        
+        # Cria um dicionário com as propriedades encontradas no texto
+        properties = {}
+        for line in lines[1:]:
+            line = line.strip()
+            # Procura por padrões como "Chave: Valor"
+            match = re.match(r'([^:]+):\s*(.*)', line)
+            if match:
+                key, value = match.groups()
+                properties[key.strip()] = value.strip()
+        
+        if not properties:
+            # Se não encontrou propriedades estruturadas, usa o texto como está, mas com o nome do produto no topo
+            page_content = f"**PRODUTO: {product_name}**\n\n{text}"
         else:
-            print(f"Diretório não encontrado, pulando: {config['path']}")
+            page_content = format_product_data(product_name, properties)
             
-    return all_docs
+        return [Document(page_content=page_content, metadata={"source": file_path})]
+    except Exception as e:
+        print(f"Erro ao processar o arquivo DOCX {os.path.basename(file_path)}: {e}")
+        return []
+
+def load_scraped_json(file_path: str) -> list[Document]:
+    """Lê o JSON gerado pelo web scraper."""
+    docs = []
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            for item in data:
+                if "page_content" in item and "metadata" in item:
+                    docs.append(Document(page_content=item["page_content"], metadata=item["metadata"]))
+        return docs
+    except Exception as e:
+        print(f"Erro ao processar o arquivo raspado {os.path.basename(file_path)}: {e}")
+        return []
 
 def load_documents(path: str):
-    """
-    Ponto de entrada principal para carregar todos os documentos de fontes locais.
-    """
-    print("Iniciando carregamento de todos os documentos locais...")
+    """Ponto de entrada principal para carregar e formatar todos os documentos locais."""
+    print("Iniciando carregamento e formatação de todos os documentos...")
+    all_docs = []
     
-    # Carrega todos os tipos de documentos das subpastas
-    all_docs = load_individual_document_types(path)
+    # Mapeia os diretórios para as funções de processamento corretas
+    directory_map = {
+        "json": load_product_json,
+        "DTS": load_product_docx, # Supondo que DOCX estejam em DTS
+        "scraped": load_scraped_json,
+    }
+
+    # Itera sobre os diretórios e processa os arquivos
+    for subdir, loader_func in directory_map.items():
+        full_path = os.path.join(path, subdir)
+        if os.path.exists(full_path):
+            print(f"Processando diretório: {full_path}")
+            for filename in os.listdir(full_path):
+                file_path = os.path.join(full_path, filename)
+                if os.path.isfile(file_path):
+                    # Chama a função específica para cada tipo de arquivo
+                    processed_docs = loader_func(file_path)
+                    all_docs.extend(processed_docs)
     
-    print(f"Total de {len(all_docs)} documentos carregados para processamento.")
+    # Carrega PDFs de forma genérica, se existirem
+    pdf_path = os.path.join(path, "DTS")
+    if os.path.exists(pdf_path):
+        pdf_loader = DirectoryLoader(pdf_path, glob="*.pdf", loader_cls=PyPDFLoader, silent_errors=True)
+        pdf_docs = pdf_loader.load()
+        if pdf_docs:
+            print(f"Carregados {len(pdf_docs)} documentos PDF de {pdf_path}")
+            all_docs.extend(pdf_docs)
+
+    print(f"Total de {len(all_docs)} documentos carregados e formatados para processamento.")
     return all_docs
 
 if __name__ == "__main__":
