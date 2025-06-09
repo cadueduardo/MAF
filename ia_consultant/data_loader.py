@@ -1,12 +1,9 @@
 import os
 from langchain_community.document_loaders import (
     DirectoryLoader,
-    JSONLoader,
-    UnstructuredWordDocumentLoader,
     UnstructuredFileLoader,
     PyPDFLoader,
     Docx2txtLoader,
-    UnstructuredJsonLoader,
 )
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -18,7 +15,7 @@ from urllib.parse import urljoin, urlparse
 LOADER_MAPPING = {
     ".pdf": (PyPDFLoader, {}),
     ".docx": (Docx2txtLoader, {}),
-    ".json": (UnstructuredJsonLoader, {}),
+    ".json": (UnstructuredFileLoader, {}),
     # Adicione outros mapeamentos conforme necessário
 }
 
