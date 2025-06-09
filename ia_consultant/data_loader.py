@@ -1,43 +1,59 @@
 import os
 from langchain_community.document_loaders import (
     DirectoryLoader,
-    UnstructuredFileLoader,
     PyPDFLoader,
     Docx2txtLoader,
+    JSONLoader,
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 
-# Mapeamento de extensões para loaders
-LOADER_MAPPING = {
-    ".pdf": (PyPDFLoader, {}),
-    ".docx": (Docx2txtLoader, {}),
-    ".json": (UnstructuredFileLoader, {}),
-    # Adicione outros mapeamentos conforme necessário
-}
+def load_individual_document_types(data_path: str):
+    """Carrega documentos de subdiretórios específicos (json, DTS) para evitar erros."""
+    all_docs = []
+    
+    # Define os caminhos e os loaders para cada tipo de arquivo
+    configs = [
+        {"path": os.path.join(data_path, "json"), "glob": "*.json", "loader_cls": JSONLoader, "loader_kwargs": {'jq_schema': '.[]', 'text_content': False}},
+        {"path": os.path.join(data_path, "DTS"), "glob": "*.docx", "loader_cls": Docx2txtLoader, "loader_kwargs": {}},
+        {"path": os.path.join(data_path, "DTS"), "glob": "*.pdf", "loader_cls": PyPDFLoader, "loader_kwargs": {}},
+    ]
 
-def load_documents_from_directory(path: str):
-    """Carrega documentos de um diretório usando loaders específicos para cada tipo de arquivo."""
-    loader = DirectoryLoader(
-        path,
-        glob="**/*",
-        loader_cls=UnstructuredFileLoader, # Loader padrão para extensões não mapeadas
-        use_multithreading=True
-    )
-    return loader.load()
+    for config in configs:
+        if os.path.exists(config["path"]):
+            loader = DirectoryLoader(
+                config["path"],
+                glob=config["glob"],
+                loader_cls=config["loader_cls"],
+                loader_kwargs=config.get("loader_kwargs", {}),
+                show_progress=True,
+                use_multithreading=True
+            )
+            try:
+                docs = loader.load()
+                all_docs.extend(docs)
+                print(f"Carregados {len(docs)} documentos de {config['path']}/{config['glob']}")
+            except Exception as e:
+                print(f"Erro ao carregar documentos de {config['path']}: {e}")
+        else:
+            print(f"Diretório não encontrado, pulando: {config['path']}")
+            
+    return all_docs
 
 def get_internal_links(url, domain):
     """Encontra todos os links internos de uma página."""
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         internal_links = set()
         for a_tag in soup.find_all('a', href=True):
             href = a_tag['href']
+            # Ignora links de email, telefone, etc.
+            if href.startswith(('mailto:', 'tel:')):
+                continue
             full_url = urljoin(url, href)
             # Normaliza a URL para remover fragmentos (#)
             full_url = full_url.split('#')[0]
@@ -51,12 +67,12 @@ def get_internal_links(url, domain):
 def scrape_page_content(url):
     """Extrai o conteúdo de texto de uma única página."""
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Remove tags de script e style
-        for script_or_style in soup(['script', 'style', 'nav', 'footer', 'header']):
+        # Remove tags de script, style, nav, footer, header
+        for script_or_style in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
             script_or_style.decompose()
 
         # Pega o texto e limpa espaços em branco
@@ -80,7 +96,7 @@ def load_documents_from_website(root_url: str):
     all_documents = []
 
     print(f"Iniciando a leitura do site: {root_url}")
-    while pages_to_visit:
+    while pages_to_visit and len(visited_pages) < 100: # Limite de segurança para não ficar em loop
         url = pages_to_visit.pop()
         if url in visited_pages:
             continue
@@ -98,6 +114,7 @@ def load_documents_from_website(root_url: str):
     print(f"Leitura do site finalizada. {len(all_documents)} páginas lidas.")
     return all_documents
 
+
 def load_documents(path: str, website_url: str = None):
     """
     Carrega documentos de um diretório local e, opcionalmente, de um site.
@@ -105,8 +122,7 @@ def load_documents(path: str, website_url: str = None):
     print("Iniciando carregamento de documentos...")
     
     # Carrega dos arquivos locais
-    local_docs = load_documents_from_directory(path)
-    print(f"{len(local_docs)} documentos carregados do diretório.")
+    local_docs = load_individual_document_types(path)
     
     # Carrega do site se a URL for fornecida
     website_docs = []
