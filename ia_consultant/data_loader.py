@@ -7,6 +7,54 @@ from langchain_community.document_loaders import (
 from langchain_core.documents import Document
 import json
 
+def format_product_json(data: dict) -> str:
+    """
+    Formata um dicionário JSON de um produto em uma string de texto legível,
+    garantindo que o nome do produto e suas propriedades estejam claramente associados.
+    """
+    lines = []
+    
+    # Tenta encontrar o nome do produto com várias chaves possíveis, ignorando maiúsculas/minúsculas.
+    product_name = ""
+    # Chaves comuns para nomes de produtos em português e inglês.
+    possible_name_keys = ['produto', 'nome do produto', 'nome', 'product', 'product name', 'código']
+    
+    found_name_key = None
+    for key in possible_name_keys:
+        for data_key in data.keys():
+            if data_key.lower() == key:
+                product_name = data[data_key]
+                found_name_key = data_key
+                break
+        if product_name:
+            break
+            
+    # Adiciona um cabeçalho claro para o LLM
+    lines.append("--- Ficha Técnica do Produto ---")
+    if product_name:
+        lines.append(f"**Nome do Produto:** {product_name}")
+    
+    # Itera sobre todos os dados e os formata
+    for key, value in data.items():
+        if key == found_name_key:
+            continue # Pula a chave do nome, pois já foi adicionada.
+            
+        formatted_key = key.replace('_', ' ').title()
+        
+        if isinstance(value, dict):
+            lines.append(f"\n**{formatted_key}:**")
+            for sub_key, sub_value in value.items():
+                lines.append(f"  - {sub_key.replace('_', ' ').title()}: {sub_value}")
+        elif isinstance(value, list):
+            lines.append(f"\n**{formatted_key}:**")
+            for item in value:
+                lines.append(f"  - {item}")
+        else:
+            lines.append(f"**{formatted_key}:** {value}")
+            
+    lines.append("--- Fim da Ficha Técnica ---")
+    return "\n\n".join(lines)
+
 def load_json_docs(path: str):
     """
     Carrega arquivos JSON de um diretório.
@@ -33,7 +81,8 @@ def load_json_docs(path: str):
                                 json_docs.append(Document(page_content=item["page_content"], metadata=item["metadata"]))
                     # Se for um dicionário (formato original de produto)
                     elif isinstance(data, dict):
-                        text_content = json.dumps(data, indent=2, ensure_ascii=False)
+                        # MODIFICADO: Usa a nova função para formatar o JSON de produto em texto legível.
+                        text_content = format_product_json(data)
                         json_docs.append(Document(page_content=text_content, metadata={"source": file_path}))
 
             except Exception as e:
