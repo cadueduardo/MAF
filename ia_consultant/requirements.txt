@@ -10,4 +10,6 @@ python-dotenv
 unstructured
 python-docx
 jq
-gunicorn 
+gunicorn
+requests
+beautifulsoup4 
