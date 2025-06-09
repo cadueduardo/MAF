@@ -30,22 +30,27 @@ export default function Home() {
 
   // Efeito para salvar/atualizar a conversa no histórico
   useEffect(() => {
-    // Só atualiza o histórico se houver uma conversa ativa e mensagens nela
+    // Só roda se houver uma conversa ativa e mensagens para salvar.
     if (currentConversationId && messages.length > 0) {
-      const updatedConversations = conversations.map(convo => 
-        convo.id === currentConversationId ? { ...convo, messages: messages } : convo
-      );
-      // Se a conversa não estiver no histórico ainda (é uma nova), adicione-a
-      if (!updatedConversations.some(c => c.id === currentConversationId)) {
-        const newConversation: Conversation = {
+      setConversations(prevConversations => {
+        const conversationExists = prevConversations.some(c => c.id === currentConversationId);
+  
+        if (conversationExists) {
+          // A conversa já existe, então apenas atualiza as mensagens dela.
+          return prevConversations.map(convo =>
+            convo.id === currentConversationId ? { ...convo, messages: messages } : convo
+          );
+        } else {
+          // É uma nova conversa, então a adiciona ao histórico.
+          const newConversation: Conversation = {
             id: currentConversationId,
-            title: messages.find(m => m.sender === 'user')?.text || "Novo Chat",
-            messages: messages
-        };
-        setConversations(prev => [...prev, newConversation]);
-      } else {
-        setConversations(updatedConversations);
-      }
+            // Pega o texto da primeira mensagem do usuário como título.
+            title: messages.find(m => m.sender === 'user')?.text.substring(0, 30) || "Novo Chat",
+            messages: messages,
+          };
+          return [...prevConversations, newConversation];
+        }
+      });
     }
   }, [messages, currentConversationId]); // Roda sempre que as mensagens ou o ID da conversa mudam
 
